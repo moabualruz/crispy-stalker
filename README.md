@@ -2,28 +2,27 @@
 
 Async Stalker/MAG portal API client.
 
-## Status
+## What This Crate Is
 
-Extracted from CrispyTivi. Intended as a reusable Rust client crate for legacy Stalker/MAG middleware portals.
+`crispy-stalker` targets legacy Stalker / MAG middleware portals. It handles portal discovery, MAC-based authentication, paginated content retrieval, and stream URL resolution in a reusable client crate.
 
-## What This Crate Provides
+## What It Provides
 
-- portal discovery
-- MAC-based authentication/session handling
-- typed access to:
-  - genres/categories
-  - channels
-  - VOD items
-  - series items
-  - EPG data
+- `StalkerClient`
+- `StalkerCredentials`
+- `StalkerSession`
+- typed models for channels, VOD, series, profile, and EPG entries
 - stream URL resolution helpers
+- retry/backoff support
 
 ## Installation
 
 ```toml
 [dependencies]
-crispy-stalker = "0.1"
+crispy-stalker = "0.1.1"
 ```
+
+MSRV: Rust `1.85`
 
 ## Quick Start
 
@@ -39,21 +38,24 @@ let creds = StalkerCredentials {
 
 let mut client = StalkerClient::new(creds, false)?;
 client.authenticate().await?;
+
+let _genres = client.get_genres().await?;
 # Ok(())
 # }
 ```
 
-## Primary Use Cases
+## Typical Uses
 
 - Stalker portal integration
-- IPTV catalog sync
-- stream URL resolution for MAG-style providers
+- channel/VOD sync jobs
+- MAG stream URL resolution
 
-## Relationship To Other Crates
+## Current Limitations
 
-- uses `crispy-iptv-types`
-- often paired with downstream mapping layers and persistence code
+- provider-side inconsistencies are common in Stalker ecosystems; callers should still expect some portals to diverge from the happy path
+- no persistence layer
+- no playback probing or media diagnostics
 
-## Caveats
+## License
 
-- public docs should explain session expiry, retry semantics, and known provider-specific quirks before release
+See `LICENSE.md` and `NOTICE.md`.
