@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
+use url::Url;
 
 use crate::backoff::BackoffConfig;
 use crate::device;
@@ -343,16 +344,23 @@ impl StalkerClient {
     /// Send an authenticated GET request to the portal with retry + backoff.
     ///
     /// Expanded with exponential backoff from Python `make_request_with_retries`.
-    async fn portal_get(&self, query: &str) -> Result<Value, StalkerError> {
+    async fn portal_get(&self, params: &[(&str, String)]) -> Result<Value, StalkerError> {
         let session = self.session()?;
-        let url = format!("{}?{query}", session.portal_url);
+        let mut url =
+            Url::parse(&session.portal_url).map_err(|e| StalkerError::UnexpectedResponse(e.to_string()))?;
+        {
+            let mut query = url.query_pairs_mut();
+            for (key, value) in params {
+                query.append_pair(key, value);
+            }
+        }
 
         let mut last_error: Option<StalkerError> = None;
 
         for attempt in 1..=(self.backoff.max_retries + 1) {
             let result = self
                 .http
-                .get(&url)
+                .get(url.as_str())
                 .header("Cookie", session.cookie_header_with_token())
                 .header("Authorization", session.auth_header())
                 .header(
@@ -406,7 +414,10 @@ impl StalkerClient {
     /// Get account information.
     pub async fn get_account_info(&self) -> Result<StalkerAccountInfo, StalkerError> {
         let body = self
-            .portal_get("type=account_info&action=get_main_info")
+            .portal_get(&[
+                ("type", "account_info".to_string()),
+                ("action", "get_main_info".to_string()),
+            ])
             .await?;
 
         let js = body
@@ -428,7 +439,12 @@ impl StalkerClient {
 
     /// Get profile information.
     pub async fn get_profile(&self) -> Result<StalkerProfile, StalkerError> {
-        let body = self.portal_get("type=stb&action=get_profile").await?;
+        let body = self
+            .portal_get(&[
+                ("type", "stb".to_string()),
+                ("action", "get_profile".to_string()),
+            ])
+            .await?;
 
         let js = body
             .get("js")
@@ -442,7 +458,12 @@ impl StalkerClient {
 
     /// Get channel categories / genres.
     pub async fn get_genres(&self) -> Result<Vec<StalkerCategory>, StalkerError> {
-        let body = self.portal_get("type=itv&action=get_genres").await?;
+        let body = self
+            .portal_get(&[
+                ("type", "itv".to_string()),
+                ("action", "get_genres".to_string()),
+            ])
+            .await?;
 
         let js = body
             .get("js")
@@ -457,7 +478,12 @@ impl StalkerClient {
 
     /// Get VOD categories.
     pub async fn get_vod_categories(&self) -> Result<Vec<StalkerCategory>, StalkerError> {
-        let body = self.portal_get("type=vod&action=get_categories").await?;
+        let body = self
+            .portal_get(&[
+                ("type", "vod".to_string()),
+                ("action", "get_categories".to_string()),
+            ])
+            .await?;
 
         let js = body
             .get("js")
@@ -472,7 +498,12 @@ impl StalkerClient {
 
     /// Get series categories.
     pub async fn get_series_categories(&self) -> Result<Vec<StalkerCategory>, StalkerError> {
-        let body = self.portal_get("type=series&action=get_categories").await?;
+        let body = self
+            .portal_get(&[
+                ("type", "series".to_string()),
+                ("action", "get_categories".to_string()),
+            ])
+            .await?;
 
         let js = body
             .get("js")
@@ -491,8 +522,14 @@ impl StalkerClient {
         genre_id: &str,
         page: u32,
     ) -> Result<PaginatedResult<StalkerChannel>, StalkerError> {
-        let query = format!("type=itv&action=get_ordered_list&genre={genre_id}&p={page}");
-        let body = self.portal_get(&query).await?;
+        let body = self
+            .portal_get(&[
+                ("type", "itv".to_string()),
+                ("action", "get_ordered_list".to_string()),
+                ("genre", genre_id.to_string()),
+                ("p", page.to_string()),
+            ])
+            .await?;
         parse_paginated(&body, parse_channel)
     }
 
@@ -508,10 +545,14 @@ impl StalkerClient {
         on_progress: Option<&dyn Fn(u32, u32)>,
     ) -> Result<Vec<StalkerChannel>, StalkerError> {
         self.fetch_all_pages_parallel(
-            &format!("type=itv&action=get_ordered_list&genre={genre_id}"),
-            parse_channel,
-            on_progress,
-        )
+                &[
+                    ("type", "itv".to_string()),
+                    ("action", "get_ordered_list".to_string()),
+                    ("genre", genre_id.to_string()),
+                ],
+                parse_channel,
+                on_progress,
+            )
         .await
     }
 
@@ -521,8 +562,14 @@ impl StalkerClient {
         category_id: &str,
         page: u32,
     ) -> Result<PaginatedResult<StalkerVodItem>, StalkerError> {
-        let query = format!("type=vod&action=get_ordered_list&category={category_id}&p={page}");
-        let body = self.portal_get(&query).await?;
+        let body = self
+            .portal_get(&[
+                ("type", "vod".to_string()),
+                ("action", "get_ordered_list".to_string()),
+                ("category", category_id.to_string()),
+                ("p", page.to_string()),
+            ])
+            .await?;
         parse_paginated(&body, parse_vod_item)
     }
 
@@ -538,7 +585,11 @@ impl StalkerClient {
     ) -> Result<Vec<StalkerVodItem>, StalkerError> {
         let all = self
             .fetch_all_pages_parallel(
-                &format!("type=vod&action=get_ordered_list&category={category_id}"),
+                &[
+                    ("type", "vod".to_string()),
+                    ("action", "get_ordered_list".to_string()),
+                    ("category", category_id.to_string()),
+                ],
                 parse_vod_item_raw,
                 on_progress,
             )
@@ -564,7 +615,11 @@ impl StalkerClient {
     ) -> Result<Vec<StalkerSeriesItem>, StalkerError> {
         let all = self
             .fetch_all_pages_parallel(
-                &format!("type=vod&action=get_ordered_list&category={category_id}"),
+                &[
+                    ("type", "vod".to_string()),
+                    ("action", "get_ordered_list".to_string()),
+                    ("category", category_id.to_string()),
+                ],
                 parse_series_with_flag,
                 on_progress,
             )
@@ -584,8 +639,14 @@ impl StalkerClient {
         category_id: &str,
         page: u32,
     ) -> Result<PaginatedResult<StalkerSeriesItem>, StalkerError> {
-        let query = format!("type=series&action=get_ordered_list&category={category_id}&p={page}");
-        let body = self.portal_get(&query).await?;
+        let body = self
+            .portal_get(&[
+                ("type", "series".to_string()),
+                ("action", "get_ordered_list".to_string()),
+                ("category", category_id.to_string()),
+                ("p", page.to_string()),
+            ])
+            .await?;
         parse_paginated(&body, parse_series_item)
     }
 
@@ -594,10 +655,16 @@ impl StalkerClient {
     /// Python: `get_seasons(movie_id)` — fetches with `movie_id={id}&season_id=0&episode_id=0`
     /// TypeScript: `getSeasons(movieId)` — same query pattern
     pub async fn get_seasons(&self, movie_id: &str) -> Result<Vec<StalkerSeason>, StalkerError> {
-        let query = format!(
-            "type=vod&action=get_ordered_list&movie_id={movie_id}&season_id=0&episode_id=0&JsHttpRequest=1-xml"
-        );
-        let body = self.portal_get(&query).await?;
+        let body = self
+            .portal_get(&[
+                ("type", "vod".to_string()),
+                ("action", "get_ordered_list".to_string()),
+                ("movie_id", movie_id.to_string()),
+                ("season_id", "0".to_string()),
+                ("episode_id", "0".to_string()),
+                ("JsHttpRequest", "1-xml".to_string()),
+            ])
+            .await?;
 
         let js = body
             .get("js")
@@ -664,10 +731,16 @@ impl StalkerClient {
         movie_id: &str,
         season_id: &str,
     ) -> Result<Vec<StalkerEpisode>, StalkerError> {
-        let query = format!(
-            "type=vod&action=get_ordered_list&movie_id={movie_id}&season_id={season_id}&episode_id=0&JsHttpRequest=1-xml"
-        );
-        let body = self.portal_get(&query).await?;
+        let body = self
+            .portal_get(&[
+                ("type", "vod".to_string()),
+                ("action", "get_ordered_list".to_string()),
+                ("movie_id", movie_id.to_string()),
+                ("season_id", season_id.to_string()),
+                ("episode_id", "0".to_string()),
+                ("JsHttpRequest", "1-xml".to_string()),
+            ])
+            .await?;
 
         let js = body
             .get("js")
@@ -740,10 +813,16 @@ impl StalkerClient {
         size: u32,
     ) -> Result<Vec<StalkerEpgEntry>, StalkerError> {
         // Try get_short_epg first
-        let short_query = format!(
-            "type=itv&action=get_short_epg&ch_id={channel_id}&size={size}&JsHttpRequest=1-xml"
-        );
-        if let Ok(body) = self.portal_get(&short_query).await {
+        if let Ok(body) = self
+            .portal_get(&[
+                ("type", "itv".to_string()),
+                ("action", "get_short_epg".to_string()),
+                ("ch_id", channel_id.to_string()),
+                ("size", size.to_string()),
+                ("JsHttpRequest", "1-xml".to_string()),
+            ])
+            .await
+        {
             let entries = parse_epg_response(&body);
             if !entries.is_empty() {
                 debug!(
@@ -757,9 +836,14 @@ impl StalkerClient {
 
         // Fallback to get_epg_info
         debug!(channel_id = channel_id, "falling back to get_epg_info");
-        let info_query =
-            format!("type=itv&action=get_epg_info&ch_id={channel_id}&JsHttpRequest=1-xml");
-        let body = self.portal_get(&info_query).await?;
+        let body = self
+            .portal_get(&[
+                ("type", "itv".to_string()),
+                ("action", "get_epg_info".to_string()),
+                ("ch_id", channel_id.to_string()),
+                ("JsHttpRequest", "1-xml".to_string()),
+            ])
+            .await?;
         let entries = parse_epg_response(&body);
 
         debug!(
@@ -779,10 +863,16 @@ impl StalkerClient {
         let encoded_cmd =
             percent_encoding::utf8_percent_encode(cmd, percent_encoding::NON_ALPHANUMERIC)
                 .to_string();
-        let query = format!(
-            "type=itv&action=create_link&cmd={encoded_cmd}&forced_storage=undefined&disable_ad=0&JsHttpRequest=1-xml"
-        );
-        let body = self.portal_get(&query).await?;
+        let body = self
+            .portal_get(&[
+                ("type", "itv".to_string()),
+                ("action", "create_link".to_string()),
+                ("cmd", encoded_cmd),
+                ("forced_storage", "undefined".to_string()),
+                ("disable_ad", "0".to_string()),
+                ("JsHttpRequest", "1-xml".to_string()),
+            ])
+            .await?;
 
         let js = body
             .get("js")
@@ -815,7 +905,12 @@ impl StalkerClient {
 
     /// Send a keepalive / watchdog event to prevent session timeout.
     pub async fn keepalive(&self) -> Result<(), StalkerError> {
-        let body = self.portal_get("type=watchdog&action=get_events").await?;
+        let body = self
+            .portal_get(&[
+                ("type", "watchdog".to_string()),
+                ("action", "get_events".to_string()),
+            ])
+            .await?;
 
         // Some portals return {"js":1} for success
         if let Some(js) = body.get("js")
@@ -855,13 +950,14 @@ impl StalkerClient {
     /// `on_progress` receives `(completed_pages, total_pages)` after each page.
     async fn fetch_all_pages_parallel<T: Send + 'static>(
         &self,
-        base_query: &str,
+        base_params: &[(&str, String)],
         parse_fn: fn(&Value) -> T,
         on_progress: Option<&dyn Fn(u32, u32)>,
     ) -> Result<Vec<T>, StalkerError> {
         // Fetch first page to determine total
-        let first_query = format!("{base_query}&p=1");
-        let first_body = self.portal_get(&first_query).await?;
+        let mut first_params = base_params.to_vec();
+        first_params.push(("p", "1".to_string()));
+        let first_body = self.portal_get(&first_params).await?;
         let first_result = parse_paginated(&first_body, parse_fn)?;
 
         let total_pages = first_result.total_pages();
@@ -888,12 +984,13 @@ impl StalkerClient {
         let remaining_pages: Vec<u32> = (2..=total_pages).collect();
 
         for batch in remaining_pages.chunks(self.concurrency) {
-            let mut results = Vec::with_capacity(batch.len());
+                let mut results = Vec::with_capacity(batch.len());
 
             // Fetch pages in this batch sequentially but with concurrent intent
-            for &page in batch {
-                let query = format!("{base_query}&p={page}");
-                match self.portal_get(&query).await {
+                for &page in batch {
+                let mut params = base_params.to_vec();
+                params.push(("p", page.to_string()));
+                match self.portal_get(&params).await {
                     Ok(body) => results.push((page, body)),
                     Err(e) => {
                         warn!(page = page, error = %e, "failed to fetch page");
@@ -929,15 +1026,16 @@ impl StalkerClient {
     #[allow(dead_code)]
     async fn fetch_all_pages<T>(
         &self,
-        base_query: &str,
+        base_params: &[(&str, String)],
         parse_fn: fn(&Value) -> T,
     ) -> Result<Vec<T>, StalkerError> {
         let mut all_items = Vec::new();
         let mut page = 1u32;
 
         loop {
-            let query = format!("{base_query}&p={page}");
-            let body = self.portal_get(&query).await?;
+            let mut params = base_params.to_vec();
+            params.push(("p", page.to_string()));
+            let body = self.portal_get(&params).await?;
             let result = parse_paginated(&body, parse_fn)?;
 
             let total_pages = result.total_pages();
@@ -974,7 +1072,7 @@ const COOKIE_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_AL
 /// Build the MAC cookie header value.
 fn build_mac_cookie(mac: &str, timezone: Option<&str>) -> String {
     let encoded = percent_encoding::utf8_percent_encode(mac, COOKIE_ENCODE_SET).to_string();
-    let tz = timezone.filter(|s| !s.is_empty()).unwrap_or("Europe/Paris");
+    let tz = timezone.filter(|s| !s.is_empty()).unwrap_or("UTC");
     let encoded_tz = percent_encoding::utf8_percent_encode(tz, COOKIE_ENCODE_SET).to_string();
     format!("mac={encoded}; stb_lang=en; timezone={encoded_tz}")
 }
@@ -1402,7 +1500,7 @@ mod tests {
         let cookie = build_mac_cookie("00:1A:79:AB:CD:EF", None);
         assert!(cookie.starts_with("mac="));
         assert!(cookie.contains("stb_lang=en"));
-        assert!(cookie.contains("timezone=Europe%2FParis"));
+        assert!(cookie.contains("timezone=UTC"));
         // MAC colons should be percent-encoded
         assert!(!cookie[4..].starts_with("00:"));
     }
@@ -1417,7 +1515,7 @@ mod tests {
     #[test]
     fn build_mac_cookie_default_timezone_when_none() {
         let cookie = build_mac_cookie("00:1A:79:AB:CD:EF", None);
-        assert!(cookie.contains("timezone=Europe%2FParis"));
+        assert!(cookie.contains("timezone=UTC"));
     }
 
     #[test]
