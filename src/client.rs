@@ -8,6 +8,7 @@
 
 use reqwest::Client;
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
@@ -43,7 +44,7 @@ pub struct StalkerClient {
     /// Token refresh lock — prevents concurrent token refreshes.
     /// TypeScript: `tokenRefreshPromise: Promise<void> | null`
     #[allow(dead_code)]
-    token_refresh_lock: Mutex<()>,
+    token_refresh_lock: Arc<Mutex<()>>,
     /// Backoff configuration for retries.
     backoff: BackoffConfig,
     /// Concurrency limit for parallel pagination.
@@ -72,7 +73,7 @@ impl StalkerClient {
             credentials,
             http,
             session: None,
-            token_refresh_lock: Mutex::new(()),
+            token_refresh_lock: Arc::new(Mutex::new(())),
             backoff: BackoffConfig::default(),
             concurrency: DEFAULT_CONCURRENCY,
             token_validity_secs: 3600,
@@ -86,7 +87,7 @@ impl StalkerClient {
             credentials,
             http,
             session: None,
-            token_refresh_lock: Mutex::new(()),
+            token_refresh_lock: Arc::new(Mutex::new(())),
             backoff: BackoffConfig::default(),
             concurrency: DEFAULT_CONCURRENCY,
             token_validity_secs: 3600,
@@ -317,6 +318,16 @@ impl StalkerClient {
             .unwrap_or(true);
 
         if needs_refresh {
+            let refresh_lock = Arc::clone(&self.token_refresh_lock);
+            let _guard = refresh_lock.lock().await;
+            let needs_refresh = self
+                .session
+                .as_ref()
+                .map(super::session::StalkerSession::is_token_expired)
+                .unwrap_or(true);
+            if !needs_refresh {
+                return Ok(());
+            }
             debug!("token expired, re-authenticating");
             self.authenticate().await?;
         }

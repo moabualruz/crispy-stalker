@@ -14,6 +14,7 @@ Async Stalker/MAG portal API client.
 - typed models for channels, VOD, series, profile, and EPG entries
 - stream URL resolution helpers
 - retry/backoff support
+- guarded token refresh behavior
 
 ## Installation
 
@@ -49,6 +50,12 @@ let _genres = client.get_genres().await?;
 - Stalker portal integration
 - channel/VOD sync jobs
 - MAG stream URL resolution
+
+## Session Semantics
+
+- session timezone now defaults to `UTC` when the caller does not provide one
+- token refresh paths are guarded so concurrent refresh attempts do not race each other
+- referer generation is derived through a dedicated helper instead of direct path string slicing in the public header path
 
 ## Current Limitations
 
