@@ -201,7 +201,10 @@ impl StalkerSession {
 
 fn derive_portal_referer(portal_url: &str) -> String {
     let Ok(mut url) = Url::parse(portal_url) else {
-        return format!("{}/stalker_portal/c/index.html", portal_url.trim_end_matches('/'));
+        return format!(
+            "{}/stalker_portal/c/index.html",
+            portal_url.trim_end_matches('/')
+        );
     };
 
     let trimmed = url
@@ -214,7 +217,10 @@ fn derive_portal_referer(portal_url: &str) -> String {
     url.set_path(&trimmed);
     url.set_query(None);
     url.set_fragment(None);
-    format!("{}/stalker_portal/c/index.html", url.as_str().trim_end_matches('/'))
+    format!(
+        "{}/stalker_portal/c/index.html",
+        url.as_str().trim_end_matches('/')
+    )
 }
 
 /// Token refresh lock — prevents concurrent token refreshes.

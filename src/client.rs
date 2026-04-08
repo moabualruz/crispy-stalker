@@ -346,8 +346,8 @@ impl StalkerClient {
     /// Expanded with exponential backoff from Python `make_request_with_retries`.
     async fn portal_get(&self, params: &[(&str, String)]) -> Result<Value, StalkerError> {
         let session = self.session()?;
-        let mut url =
-            Url::parse(&session.portal_url).map_err(|e| StalkerError::UnexpectedResponse(e.to_string()))?;
+        let mut url = Url::parse(&session.portal_url)
+            .map_err(|e| StalkerError::UnexpectedResponse(e.to_string()))?;
         {
             let mut query = url.query_pairs_mut();
             for (key, value) in params {
@@ -545,14 +545,14 @@ impl StalkerClient {
         on_progress: Option<&dyn Fn(u32, u32)>,
     ) -> Result<Vec<StalkerChannel>, StalkerError> {
         self.fetch_all_pages_parallel(
-                &[
-                    ("type", "itv".to_string()),
-                    ("action", "get_ordered_list".to_string()),
-                    ("genre", genre_id.to_string()),
-                ],
-                parse_channel,
-                on_progress,
-            )
+            &[
+                ("type", "itv".to_string()),
+                ("action", "get_ordered_list".to_string()),
+                ("genre", genre_id.to_string()),
+            ],
+            parse_channel,
+            on_progress,
+        )
         .await
     }
 
@@ -984,10 +984,10 @@ impl StalkerClient {
         let remaining_pages: Vec<u32> = (2..=total_pages).collect();
 
         for batch in remaining_pages.chunks(self.concurrency) {
-                let mut results = Vec::with_capacity(batch.len());
+            let mut results = Vec::with_capacity(batch.len());
 
             // Fetch pages in this batch sequentially but with concurrent intent
-                for &page in batch {
+            for &page in batch {
                 let mut params = base_params.to_vec();
                 params.push(("p", page.to_string()));
                 match self.portal_get(&params).await {
