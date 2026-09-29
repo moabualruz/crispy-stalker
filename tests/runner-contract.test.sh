@@ -75,6 +75,19 @@ awk '
   END { if (artifact) { print "artifact restore has no event condition" > "/dev/stderr"; exit 1 } }
 ' "$workflow"
 
+# Every gate job must verify the broker worktree, and the aggregate must route
+# from event context only (never from prepare output, so fork PRs cannot reach self-hosted).
+for job in fmt clippy cargo-test doc package; do
+  awk -v j="  $job:" '$0==j{i=1;next} i&&/^  [a-z-]+:$/{exit} i&&/name: Verify host-prepared PR checkout/{f=1} END{exit !f}' "$workflow" \
+    || { echo "job $job lacks HEAD verification" >&2; exit 1; }
+done
+aggregate_runs_on="$(awk '/^  test:$/{j=1;next} j&&/^    runs-on: /{print;exit}' "$workflow")"
+if [[ "$aggregate_runs_on" == *needs.prepare* ]]; then
+  echo 'aggregate routes from prepare output (fork PRs could reach self-hosted)' >&2
+  exit 1
+fi
+grep -Fq 'bash tests/runner-contract.test.sh' "$(dirname "$workflow")/../../justfile"
+
 # Model the status-function behavior that decides whether GitHub starts the
 # aggregate job after a prerequisite is cancelled.
 case "$aggregate_condition" in
@@ -102,17 +115,18 @@ git -C "$tmp" commit -qam 'PR head commit'
 head_sha="$(git -C "$tmp" rev-parse HEAD)"
 test "$merge_sha" != "$head_sha"
 pr_worktree="$tmp/pr-worktree"
-git -C "$tmp" worktree add -q --detach "$pr_worktree" "$head_sha"
+# pull_request checkouts are the test MERGE commit, so GITHUB_SHA is the merge sha.
+git -C "$tmp" worktree add -q --detach "$pr_worktree" "$merge_sha"
 pr_workspace_link="$tmp/pr-workspace"
 ln -s "$pr_worktree" "$pr_workspace_link"
 
 (
   cd "$pr_workspace_link"
-  GITHUB_EVENT_NAME=pull_request GITHUB_SHA="$head_sha" GITHUB_WORKSPACE="$pr_workspace_link" bash -e -c "$guard"
+  GITHUB_EVENT_NAME=pull_request GITHUB_SHA="$merge_sha" GITHUB_WORKSPACE="$pr_workspace_link" bash -e -c "$guard"
 )
 if (
   cd "$pr_workspace_link"
-  GITHUB_EVENT_NAME=pull_request GITHUB_SHA="$merge_sha" GITHUB_WORKSPACE="$pr_workspace_link" bash -e -c "$guard"
+  GITHUB_EVENT_NAME=pull_request GITHUB_SHA="$head_sha" GITHUB_WORKSPACE="$pr_workspace_link" bash -e -c "$guard"
 ); then
   echo 'same-repo guard accepted a checkout at the wrong commit' >&2
   exit 1

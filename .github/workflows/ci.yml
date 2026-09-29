@@ -67,6 +67,18 @@ jobs:
     needs: prepare
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
     steps:
+      - name: Verify host-prepared PR checkout
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          test "$GITHUB_EVENT_NAME" = pull_request
+          workspace_root="$(cd "$GITHUB_WORKSPACE" && pwd -P)"
+          test "$(pwd -P)" = "$workspace_root"
+          test "$(git rev-parse --show-toplevel)" = "$workspace_root"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Isolate this gate build output
         run: printf 'CARGO_TARGET_DIR=%s/cargo-target-%s-%s-fmt\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Download prepared source
@@ -88,6 +100,18 @@ jobs:
     needs: prepare
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
     steps:
+      - name: Verify host-prepared PR checkout
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          test "$GITHUB_EVENT_NAME" = pull_request
+          workspace_root="$(cd "$GITHUB_WORKSPACE" && pwd -P)"
+          test "$(pwd -P)" = "$workspace_root"
+          test "$(git rev-parse --show-toplevel)" = "$workspace_root"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Isolate this gate build output
         run: printf 'CARGO_TARGET_DIR=%s/cargo-target-%s-%s-clippy\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Download prepared source
@@ -109,6 +133,18 @@ jobs:
     needs: prepare
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
     steps:
+      - name: Verify host-prepared PR checkout
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          test "$GITHUB_EVENT_NAME" = pull_request
+          workspace_root="$(cd "$GITHUB_WORKSPACE" && pwd -P)"
+          test "$(pwd -P)" = "$workspace_root"
+          test "$(git rev-parse --show-toplevel)" = "$workspace_root"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Isolate this gate build output
         run: printf 'CARGO_TARGET_DIR=%s/cargo-target-%s-%s-test\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Download prepared source
@@ -130,6 +166,18 @@ jobs:
     needs: prepare
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
     steps:
+      - name: Verify host-prepared PR checkout
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          test "$GITHUB_EVENT_NAME" = pull_request
+          workspace_root="$(cd "$GITHUB_WORKSPACE" && pwd -P)"
+          test "$(pwd -P)" = "$workspace_root"
+          test "$(git rev-parse --show-toplevel)" = "$workspace_root"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Isolate this gate build output
         run: printf 'CARGO_TARGET_DIR=%s/cargo-target-%s-%s-doc\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Download prepared source
@@ -150,6 +198,18 @@ jobs:
     needs: prepare
     runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on) }}
     steps:
+      - name: Verify host-prepared PR checkout
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          test "$GITHUB_EVENT_NAME" = pull_request
+          workspace_root="$(cd "$GITHUB_WORKSPACE" && pwd -P)"
+          test "$(pwd -P)" = "$workspace_root"
+          test "$(git rev-parse --show-toplevel)" = "$workspace_root"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Isolate this gate build output
         run: printf 'CARGO_TARGET_DIR=%s/cargo-target-%s-%s-package\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Download prepared source
@@ -169,7 +229,7 @@ jobs:
   test:
     if: ${{ always() }}
     needs: [prepare, fmt, clippy, cargo-test, doc, package]
-    runs-on: ${{ fromJSON(needs.prepare.outputs.runs_on || '["self-hosted","linux","x64","generic"]') }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON(format('["self-hosted","linux","x64","generic","pr-{0}-{1}"]', github.repository_id, github.event.pull_request.number)) || github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","generic"]') }}
     steps:
       - name: Preserve required test status
         env:
