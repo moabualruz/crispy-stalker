@@ -783,7 +783,7 @@ impl StalkerClient {
     ///
     /// `series` is the pre-fetched series metadata. The method calls
     /// `get_seasons` and then `get_episodes` for each season, returning
-    /// everything in a single [`StalkerSeriesDetail`].
+    /// everything in a single `StalkerSeriesDetail`.
     pub async fn get_series_info(
         &self,
         series: StalkerSeriesItem,
