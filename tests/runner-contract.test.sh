@@ -7,7 +7,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 extract_run() {
   awk -v wanted="$1" '
-    $0 == "      - name: " wanted { step = 1; next }
+    $0 == "      - name: " wanted || $0 == "        name: " wanted { step = 1; next }
     step && $0 == "        run: |" { run = 1; next }
     step && /^        run: / { sub(/^        run: /, ""); print; exit }
     step && /^      - / { exit }
@@ -75,27 +75,55 @@ awk '
   END { if (artifact) { print "artifact restore has no event condition" > "/dev/stderr"; exit 1 } }
 ' "$workflow"
 
-# Every gate job must verify the broker worktree, and the aggregate must route
-# from event context only (never from prepare output, so fork PRs cannot reach self-hosted).
+# Every gate job must run the SAME guard as prepare (executed below against real git state).
+extract_job_run() {
+  awk -v job="  $1:" -v wanted="$2" '
+    $0 == job { j = 1; next }
+    j && /^  [a-z-]+:$/ { exit }
+    j && $0 == "      - name: " wanted { step = 1; next }
+    step && $0 == "        run: |" { run = 1; next }
+    step && /^      - / { exit }
+    run { sub(/^          /, ""); print }
+  ' "$workflow"
+}
 for job in fmt clippy cargo-test doc package; do
-  awk -v j="  $job:" '$0==j{i=1;next} i&&/^  [a-z-]+:$/{exit} i&&/name: Verify host-prepared PR checkout/{f=1} END{exit !f}' "$workflow" \
-    || { echo "job $job lacks HEAD verification" >&2; exit 1; }
+  gate_guard="$(extract_job_run "$job" 'Verify host-prepared PR checkout')"
+  [[ "$gate_guard" == "$guard" ]] || { echo "job $job guard differs from prepare guard" >&2; exit 1; }
 done
-aggregate_runs_on="$(awk '/^  test:$/{j=1;next} j&&/^    runs-on: /{print;exit}' "$workflow")"
-if [[ "$aggregate_runs_on" == *needs.prepare* ]]; then
-  echo 'aggregate routes from prepare output (fork PRs could reach self-hosted)' >&2
-  exit 1
-fi
 grep -Fq 'bash tests/runner-contract.test.sh' "$(dirname "$workflow")/../../justfile"
 
-# Model the status-function behavior that decides whether GitHub starts the
-# aggregate job after a prerequisite is cancelled.
-case "$aggregate_condition" in
-  "\${{ always() }}") aggregate_runs_after_cancel=true ;;
-  "\${{ !cancelled() }}") aggregate_runs_after_cancel=false ;;
-  *) echo "unsupported aggregate condition: $aggregate_condition" >&2; exit 1 ;;
-esac
-test "$aggregate_runs_after_cancel" = true
+# Execute the real route step and evaluate the real runs-on expressions per event.
+route="$(extract_run 'Select trusted runner route')"
+route_out() {
+  : > "$tmp/route.out"
+  env GITHUB_OUTPUT="$tmp/route.out" EVENT_NAME="$1" HEAD_REPOSITORY="$2" BASE_REPOSITORY=o/r REPOSITORY_ID=42 PR_NUMBER=7 bash -e -c "$route"
+  cat "$tmp/route.out"
+}
+[[ "$(route_out pull_request o/r)" == 'runs_on=["self-hosted","linux","x64","generic","pr-42-7"]' ]]
+[[ "$(route_out pull_request fork/r)" == 'runs_on="ubuntu-latest"' ]]
+[[ "$(route_out push '')" == 'runs_on=["self-hosted","linux","x64","generic"]' ]]
+python3 - "$workflow" <<'PY'
+import json, sys
+from types import SimpleNamespace as N
+lines = open(sys.argv[1]).read().split("\n")
+def runs_on(job):
+    start = lines.index(f"  {job}:")
+    line = next(l for l in lines[start + 1:] if l.startswith("    runs-on: "))
+    return line.split("${{", 1)[1].rsplit("}}", 1)[0].strip().replace("&&", " and ").replace("||", " or ")
+def route(expr, name, head="o/r"):
+    g = N(event_name=name, repository="o/r", repository_id=42,
+          event=N(pull_request=N(head=N(repo=N(full_name=head)), number=7)))
+    return eval(expr, {"__builtins__": {}}, {"github": g, "fromJSON": json.loads,
+                "format": lambda t, *a: t.format(*a)})
+for job in ("prepare", "test"):
+    expr = runs_on(job)
+    assert route(expr, "pull_request") == ["self-hosted", "linux", "x64", "generic", "pr-42-7"], job
+    assert route(expr, "pull_request", "fork/r") == "ubuntu-latest", job
+    assert route(expr, "push") == ["self-hosted", "linux", "x64", "generic"], job
+PY
+
+# The aggregate must still start after a cancelled prerequisite.
+[[ "$aggregate_condition" == '${{ always() }}' ]]
 if env PREPARE_RESULT=success FMT_RESULT=success CLIPPY_RESULT=cancelled \
   CARGO_TEST_RESULT=success DOC_RESULT=success PACKAGE_RESULT=success \
   bash -e -c "$aggregate"; then
