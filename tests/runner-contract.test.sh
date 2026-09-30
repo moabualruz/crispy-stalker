@@ -186,12 +186,22 @@ fi
 mkdir "$tmp/restore"
 tar -xzf "$tmp/runner-temp/source.tar.gz" -C "$tmp/restore"
 grep -Fxq 'merge source' "$tmp/restore/source.txt"
+# Simulate a re-run of failed jobs: prepare uploaded in attempt 1, the re-run gate jobs download in
+# attempt 2. Resolve every artifact name with those contexts; each download must find the upload.
+ruby -ryaml -e '
+  jobs = YAML.load_file(ARGV[0]).fetch("jobs")
+  resolve = lambda { |name, attempt| name.to_s.gsub("${{ github.run_id }}", "4242").gsub("${{ github.run_attempt }}", attempt.to_s) }
+  steps = jobs.values.flat_map { |job| job.fetch("steps", []) }
+  uploads = steps.select { |step| step["uses"].to_s.start_with?("actions/upload-artifact@") }
+  downloads = steps.select { |step| step["uses"].to_s.start_with?("actions/download-artifact@") }
+  abort "no upload step" if uploads.empty?
+  abort "no download steps" if downloads.empty?
+  uploads.each { |step| abort "upload does not overwrite" unless step.dig("with", "overwrite") == true }
+  uploaded = uploads.map { |step| resolve.call(step.dig("with", "name"), 1) }.uniq
+  abort "uploads resolve to several names: #{uploaded}" unless uploaded.size == 1
+  downloads.each do |step|
+    found = resolve.call(step.dig("with", "name"), 2)
+    abort "re-run download #{found} cannot find upload #{uploaded.first}" unless found == uploaded.first
+  end
+' "$workflow"
 echo 'runner workflow contract passed'
-
-# A re-run of failed jobs gets a new run_attempt, so an artifact name that embeds
-# it cannot be found by the re-run jobs; the name is run-scoped and the upload overwrites.
-if grep -Eq '^ +name: .*github\.run_attempt' "$workflow"; then
-  echo 'artifact name embeds run_attempt' >&2
-  exit 1
-fi
-test "$(grep -c 'overwrite: true' "$workflow")" -eq "$(grep -c 'actions/upload-artifact@' "$workflow")"
